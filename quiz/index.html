@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#f6f5ef"><meta name="robots" content="noindex,nofollow"><title>执法刷题</title><style>body{margin:0;background:#f6f5ef;color:#242f2b;font:16px/1.8 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}main{max-width:440px;margin:18vh auto;padding:24px}h1{font-size:30px}p{color:#66716a}button{padding:12px 24px;border:0;border-radius:6px;background:#285d48;color:#fafaf4;font:inherit;min-height:48px}</style></head><body><main><h1>执法刷题。</h1><p id="status" role="status">正在打开你的题库…</p><button id="retry" hidden>重新打开</button><noscript>请允许浏览器运行 JavaScript 后重试。</noscript></main><script>
+(async function(){
+  const status=document.getElementById('status');
+  const retry=document.getElementById('retry');
+  retry.onclick=()=>location.reload();
+  function fail(){status.textContent='暂时没能连接到题库，请检查网络后重试。已保存的刷题进度不会因此清除。';retry.hidden=false;}
+  const abort=new AbortController();const timeout=setTimeout(()=>abort.abort(),15000);
+  try{
+    // Reuse the existing NAS-maintained entry, which tracks its current external address.
+    const response=await fetch('/j/?quiz-entry=1',{cache:'no-store',signal:abort.signal});
+    if(!response.ok)throw new Error('entry');
+    const html=new DOMParser().parseFromString(await response.text(),'text/html');
+    const content=html.querySelector('meta[http-equiv="refresh" i]')?.getAttribute('content')||'';
+    const match=content.match(/url\s*=\s*(https:\/\/[^\s"'<>]+)/i);
+    if(!match)throw new Error('address');
+    const target=new URL(match[1]);
+    if(target.protocol!=='https:'||!target.hostname.endsWith('.trycloudflare.com'))throw new Error('host');
+    clearTimeout(timeout);
+    const loader=document.createElement('script');
+    loader.src=target.origin+'/quiz-loader.js?v=20261026-1';
+    loader.onerror=fail;
+    document.head.append(loader);
+    setTimeout(()=>{if(document.getElementById('status'))fail();},20000);
+  }catch(error){clearTimeout(timeout);fail();}
+})();
+</script></body></html>
