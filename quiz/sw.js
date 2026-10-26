@@ -1,11 +1,16 @@
 'use strict';
-const VERSION = 'e04e5907fae982d8ffea2fa42fb3162e013c974f006d51817cc67f7bdb41aa69';
+const VERSION = 'd2dce53cc50e07fdd7973030189c10ba5749502895ec45afc548954c09f327b7';
 const PREFIX = 'adminlaw-offline-';
-// One atomic snapshot shared by old/new workers during a release transition.
+// Share the activated snapshot: a navigation can briefly reach the prior worker
+// even after clients.claim(). Keep immutable copies for download verification.
 const CACHE = PREFIX + 'v1';
 const APP = new URL('./offline-' + VERSION + '.html', self.location.href).href;
 const SCOPE = new URL('./', self.location.href);
 const SAVED = new URL('./saved-quiz.html', self.location.href).href;
+
+self.addEventListener('message', event => {
+  if (event.data?.type === 'QUIZ_VERSION') event.ports[0]?.postMessage({version: VERSION});
+});
 
 async function downloadSnapshot() {
   const controller = new AbortController();
@@ -20,9 +25,15 @@ async function downloadSnapshot() {
     const digest = await crypto.subtle.digest('SHA-256', bytes);
     const hash = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
     if (hash !== VERSION) throw new Error('Quiz download verification failed');
+    const headers = new Headers(response.headers);
+    headers.set('X-Quiz-Snapshot', VERSION);
+    // Cache API stores this explicitly; the browser's navigation cache must not
+    // reuse a response produced by a worker from the previous release.
+    headers.set('Cache-Control', 'no-store');
+    const snapshot = new Response(bytes, {status: response.status, headers});
     const cache = await caches.open(CACHE);
-    await cache.put(SAVED, response.clone());
-    return response;
+    await cache.put(APP, snapshot.clone());
+    return snapshot;
   } finally { clearTimeout(timeout); }
 }
 
@@ -39,6 +50,13 @@ self.addEventListener('activate', event => {
     for (const key of await caches.keys()) {
       if (key.startsWith(PREFIX) && key !== CACHE) await caches.delete(key);
     }
+    const cache = await caches.open(CACHE);
+    const activated = await cache.match(APP);
+    if (!activated) throw new Error('Verified snapshot missing during activation');
+    await cache.put(SAVED, activated);
+    const prior = (await cache.keys()).filter(r=>r.url !== APP && /\/offline-[a-f0-9]{64}\.html$/.test(new URL(r.url).pathname));
+    // Keep two prior immutable snapshots for tabs still finishing a release transition.
+    for (const request of prior.slice(0, Math.max(0, prior.length-2))) await cache.delete(request);
     await self.clients.claim();
   })());
 });
@@ -51,10 +69,19 @@ self.addEventListener('fetch', event => {
   // The registration checks for updates separately; an update never flips a question.
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
-    const saved = await cache.match(SAVED);
-    if (saved) return saved;
+    const saved = await cache.match(SAVED) || await cache.match(APP);
+    if (saved) {
+      const headers = new Headers(saved.headers);
+      headers.set('X-Quiz-Worker', VERSION);
+      headers.set('X-Quiz-App', APP);
+      return new Response(await saved.arrayBuffer(), {status:saved.status, headers});
+    }
     // Rebuild offline storage if the browser evicted the cached page.
-    try { return await downloadSnapshot(); } catch {}
+    try {
+      const snapshot = await downloadSnapshot();
+      if (!await cache.match(SAVED)) await cache.put(SAVED, snapshot.clone());
+      return snapshot;
+    } catch {}
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 12000);
