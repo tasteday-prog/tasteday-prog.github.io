@@ -18,7 +18,7 @@
     if(target.protocol!=='https:'||!target.hostname.endsWith('.trycloudflare.com'))throw new Error('host');
     clearTimeout(timeout);
     const loader=document.createElement('script');
-    loader.src=target.origin+'/quiz-loader.js?v=20261026-1';
+    loader.src=target.origin+'/quiz-loader.js?v=20261026-2';
     loader.onerror=fail;
     document.head.append(loader);
     setTimeout(()=>{if(document.getElementById('status'))fail();},20000);
