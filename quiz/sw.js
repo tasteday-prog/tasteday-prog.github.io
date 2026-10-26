@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = 'd2dce53cc50e07fdd7973030189c10ba5749502895ec45afc548954c09f327b7';
+const VERSION = '2af8fc38ebf064c9dd949990da7a4c8d906b7b08f8602c195c043d35637b0952';
 const PREFIX = 'adminlaw-offline-';
 // Share the activated snapshot: a navigation can briefly reach the prior worker
 // even after clients.claim(). Keep immutable copies for download verification.
