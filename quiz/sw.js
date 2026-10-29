@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = '1b22c74ed452db871e8f9cc000e7049f845f1263aa0b0505fa376e512eed0c9c';
+const VERSION = 'ce004d53b9622d1bd38f94287ba01cabd9e7c2f183324fb61b535412f3ab3f1f';
 const PREFIX = 'adminlaw-offline-';
 // Share the activated snapshot: a navigation can briefly reach the prior worker
 // even after clients.claim(). Keep immutable copies for download verification.
@@ -90,7 +90,7 @@ self.addEventListener('fetch', event => {
         if (response.ok) return response;
       } finally { clearTimeout(timeout); }
     } catch {}
-    return new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>执法刷题</title><body style="font:18px/1.8 -apple-system,sans-serif;padding:24px;background:#f6f5ef;color:#242f2b"><h1>暂时无法打开题库</h1><p>请恢复网络后重试。已保存的答题进度不会因此清除。</p><button onclick="location.reload()" style="font:inherit;padding:12px 24px">重新打开</button></body></html>', {
+    return new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>胡艺行政执法刷题</title><body style="font:18px/1.8 -apple-system,sans-serif;padding:24px;background:#f6f5ef;color:#242f2b"><h1>暂时无法打开题库</h1><p>请恢复网络后重试。已保存的答题进度不会因此清除。</p><button onclick="location.reload()" style="font:inherit;padding:12px 24px">重新打开</button></body></html>', {
       status: 503, headers: {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store'}
     });
   })());
