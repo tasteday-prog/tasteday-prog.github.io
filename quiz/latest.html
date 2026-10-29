@@ -45,11 +45,13 @@ body:not([data-mode="stats"]) .shell{padding-bottom:calc(136px + var(--quiz-nav-
 @media(max-width:350px){.shell{padding-left:14px;padding-right:14px}.tabs{gap:0}.option{gap:10px;padding:11px}}
 .audit-tag{font-size:11px;color:var(--muted)}.audit-tag.disputed{color:#87612b}.result.neutral h2{color:#87612b}.basis{margin-top:18px}.basis h3{font-size:14px;font-weight:650;color:var(--ink);margin:0 0 6px}.original-bank,.legal-sources{margin-top:18px;border-top:1px solid var(--line);padding-top:8px}.original-bank p{color:var(--muted)}.legal-reference{margin-top:14px}.legal-reference a{color:var(--green);text-underline-offset:3px}.legal-reference blockquote{font-size:var(--font);line-height:1.85;white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0;padding-left:14px;border-left:2px solid var(--line)}.audit-summary{padding:16px 0;border-top:1px solid var(--line)}
 .learning-summary{margin:24px 0;border-top:1px solid var(--line);padding-top:16px}.learning-summary h3{font-size:18px;margin:0 0 10px}.learning-summary .info{margin:16px 0}.domain-progress{border-top:1px solid var(--line);padding:8px 0}.topic-progress{padding:12px 0 12px 14px;border-top:1px solid var(--line);font-size:14px}.topic-progress p{font-size:13px;line-height:1.7;color:var(--muted);margin:7px 0}.selection-reason{margin-top:18px}.empty .primary{width:100%;margin:12px 0}.quiz-filters .controls select{width:100%;font-size:16px}.quiz-filters .controls{display:grid;grid-template-columns:1fr 1fr;gap:8px}.quiz-filters #topic-filter,.quiz-filters #open-disputed{grid-column:1/-1}
+
+.offline-status{display:block;min-height:18px;margin-top:4px;font-size:11px;line-height:1.6;color:var(--muted)}
 </style>
 </head>
 <body>
   <div class="shell">
-    <header class="masthead"><div><span class="eyebrow">行政执法证考试</span><h1>胡艺行政执法刷题</h1></div><button id="font" class="quiet" aria-label="调整字号">字号 A+</button></header>
+    <header class="masthead"><div><span class="eyebrow">行政执法证考试</span><h1>胡艺行政执法刷题</h1><span id="offline-status" class="offline-status" role="status">题库正在保存到本机…</span></div><button id="font" class="quiet" aria-label="调整字号">字号 A+</button></header>
     <nav class="tabs" aria-label="刷题模式"><button data-mode="new" aria-selected="true">做新题</button><button data-mode="wrong" aria-selected="false">错题集 <span id="wrong-count">0</span></button><button data-mode="stats" aria-selected="false">进度</button></nav>
     <div id="notice" role="status" hidden></div>
     <main id="main"></main>
@@ -182,7 +184,7 @@ const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;', '<
 let state = freshState(), mode = 'new', filter = 'all', review = 'active', scope = 'all';
 let current = null, selected = [], result = null, roundDone = new Set(), storageBroken = false;
 let trail = [], trailIndex = -1;
-let rawBroken = '', resetOpen = false;
+let rawBroken = '', resetOpen = false, storedRaw = null;
 function notice(text = '') {
   const el = document.querySelector('#notice');
   el.textContent = text; el.hidden = !text;
@@ -190,18 +192,26 @@ function notice(text = '') {
 try {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (raw) state = validateState(JSON.parse(raw), bank).state;
+  storedRaw = raw;
 } catch (error) {
   storageBroken = true;
   try { rawBroken = localStorage.getItem(STORAGE_KEY) || ''; } catch {}
   notice('浏览器里的记录暂时无法读取。请先到“进度”导出备份；本次作答会留在当前页面，但还没有永久保存。');
 }
+function readLatest() {
+  const raw=localStorage.getItem(STORAGE_KEY);
+  // Our own last write is already validated. Only revalidate foreign changes.
+  if(raw && raw!==storedRaw)state=mergeStates(state,validateState(JSON.parse(raw),bank).state);
+  storedRaw=raw;
+}
 function persist() {
   if (storageBroken) return false;
   try {
     // Merge another tab's latest submitted answers before writing.
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) state = mergeStates(state, validateState(JSON.parse(raw), bank).state);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    readLatest();
+    const raw=JSON.stringify(state);
+    localStorage.setItem(STORAGE_KEY,raw);
+    storedRaw=raw;
     return true;
   } catch {
     storageBroken = true;
@@ -246,10 +256,13 @@ function navigate(direction) {
   }
   render();top();
 }
-function navigationHtml() {
+function feedbackHtml() {
   const disputed=current&&isDisputed(current,reviews);
   const feedback=result?(disputed?'本题不判分 · 已记为做过':result.lastCorrect?'✓ 回答正确':'× 回答错误 · 正确答案 '+answerLabel(current,current.answer)):current?(current.type==='multiple'?'多选后提交；下一题可暂时跳过':'点选即判分；下一题可暂时跳过'):'本轮已结束，可回看上一题';
-  return `<nav class="question-nav" aria-label="题目导航"><div class="answer-feedback ${result?(disputed?'neutral':result.lastCorrect?'correct':'wrong'):''}" role="status" aria-live="polite">${escape(feedback)}</div><div class="actions"><button class="secondary" id="previous" ${trailIndex<=0?'disabled':''}>← 上一题</button><button class="primary" id="next" ${!current?'disabled':''}>下一题 →</button></div></nav>`;
+  return `<div class="answer-feedback ${result?(disputed?'neutral':result.lastCorrect?'correct':'wrong'):''}" role="status" aria-live="polite">${escape(feedback)}</div>`;
+}
+function navigationHtml() {
+  return `<nav class="question-nav" aria-label="题目导航">${feedbackHtml()}<div class="actions"><button class="secondary" id="previous" ${trailIndex<=0?'disabled':''}>← 上一题</button><button class="primary" id="next" ${!current?'disabled':''}>下一题 →</button></div></nav>`;
 }
 function render() {
   document.body.dataset.mode = mode;
@@ -325,7 +338,7 @@ function resultHtml(q, record) {
 function submit() {
   if (result || !current || !selected.length) return;
   if (!storageBroken) {
-    try { const raw=localStorage.getItem(STORAGE_KEY);if(raw)state=mergeStates(state,validateState(JSON.parse(raw),bank).state); } catch {}
+    try { readLatest(); } catch {}
   }
   if (mode==='new'&&wasDone(state,current.id)) { notice('这道题已在另一个页面完成，已接着为你选新题。');pick();render();return; }
   if(isDisputed(current,reviews)) {
@@ -337,7 +350,23 @@ function submit() {
   }
   if(state.draft?.id===current.id)state.draft=null;
   const scrollY=window.scrollY;
-  persist();remember();render();
+  persist();remember();
+  // Keep the question, filters and navigation in place while showing feedback.
+  // Replacing the full page here used to repeat layout work after every tap.
+  const disputed=isDisputed(current,reviews);
+  main.querySelectorAll('[data-answer]').forEach(button=>{
+    const key=button.dataset.answer,chosen=selected.includes(key),correct=!disputed&&current.answer.includes(key),wrong=!disputed&&chosen&&!correct;
+    button.disabled=true;button.classList.toggle('selected',chosen);button.classList.toggle('correct',correct);button.classList.toggle('incorrect',wrong);button.setAttribute('aria-pressed',String(chosen));
+    const mark=document.createElement('span');mark.className='mark';mark.textContent=correct?'✓':wrong?'×':'';button.append(mark);
+  });
+  document.querySelector('#submit')?.parentElement.remove();
+  main.querySelector('article').insertAdjacentHTML('beforeend',resultHtml(current,result));
+  main.querySelector('.answer-feedback').outerHTML=feedbackHtml();
+  document.querySelector('#wrong-count').textContent=bank.filter(activeWrong).length;
+  if(mode==='new'){
+    const progress=learningProgress(bank,state,learning,preferences);
+    main.querySelector('.progress-line span').textContent=`${preferences.stage==='quality'?'优质题':preferences.stage==='ordinary'?'普通题':'全部'} · 已做 ${progress.done} / ${progress.total}`;
+  }
   window.scrollTo({top:scrollY,behavior:'instant'});
 }
 function switchMode(nextMode) {
@@ -346,7 +375,16 @@ function switchMode(nextMode) {
   render();top();
 }
 function learningStatsHtml(){
- const count=filters=>learningProgress(bank,state,learning,filters);
+ // Build all displayed counters in one pass instead of filtering the entire
+ // question bank separately for every stage, domain and topic.
+ const totals=new Map();
+ for(const q of bank){
+  const meta=learning.questions[q.id],done=wasDone(state,q.id)?1:0;
+  for(const key of ['stage:all','stage:'+meta.stage,'domain:'+meta.domain,'topic:'+meta.topic+':'+meta.stage]){
+   const value=totals.get(key)||{total:0,done:0};value.total++;value.done+=done;totals.set(key,value);
+  }
+ }
+ const count=filters=>totals.get(filters.topic?'topic:'+filters.topic+':'+filters.stage:filters.domain?'domain:'+filters.domain:'stage:'+filters.stage)||{total:0,done:0};
  const groups=Object.entries(stageNames).map(([id,title])=>{const p=count({stage:id});return `<div class="stats-row"><span>${title}</span><span>已做 ${p.done} / ${p.total}</span></div>`;}).join('');
  const domains=learning.domains.map(d=>{
   const p=count({stage:'all',domain:d.id});
@@ -408,26 +446,46 @@ document.querySelector('#import-file').onchange=async e=>{
 };
 document.querySelectorAll('button[data-mode]').forEach(el=>el.onclick=()=>switchMode(el.dataset.mode));
 document.querySelector('#font').onclick=()=>{const sizes=[16,18,20,22];state.font=sizes[(sizes.indexOf(state.font)+1)%sizes.length];persist();document.documentElement.style.setProperty('--font',state.font+'px');};
-window.addEventListener('storage',e=>{if(e.key!==STORAGE_KEY||!e.newValue)return;try{state=validateState(JSON.parse(e.newValue),bank).state;roundDone.clear();if(mode!=='stats')pick(true);render();}catch{notice('另一个页面的记录暂时无法读取，请保留当前页面并导出备份。');}});
+window.addEventListener('storage',e=>{if(e.key!==STORAGE_KEY||!e.newValue)return;try{state=validateState(JSON.parse(e.newValue),bank).state;storedRaw=e.newValue;roundDone.clear();if(mode!=='stats')pick(true);render();}catch{notice('另一个页面的记录暂时无法读取，请保留当前页面并导出备份。');}});
 pick(true);render();
 </script>
 <script>
-// The complete page works even when offline storage is unavailable.
-if ('serviceWorker' in navigator) {
-  (async () => {
-    try {
-      await navigator.serviceWorker.register('./sw.js', {
-        scope: './', updateViaCache: 'none'
+// The complete quiz remains usable while its verified offline copy downloads.
+(() => {
+  const status=document.querySelector('#offline-status');
+  const show=text=>{if(status)status.textContent=text;};
+  if(!('serviceWorker' in navigator)) {
+    show('当前浏览器暂不支持离线保存');return;
+  }
+  const requested=new URL(location.href).searchParams.get('release');
+  const expected=/^[a-f0-9]{64}$/.test(requested||'')?requested:null;
+  let timer,deadline,finished=false;
+  const cleanup=()=>{clearTimeout(timer);clearTimeout(deadline);navigator.serviceWorker.removeEventListener('controllerchange',check);};
+  async function check() {
+    if(finished)return;
+    clearTimeout(timer);
+    const worker=navigator.serviceWorker.controller;
+    if(worker) {
+      const version=await new Promise(resolve=>{
+        const channel=new MessageChannel();
+        const timeout=setTimeout(()=>{channel.port1.close();resolve(null);},1000);
+        channel.port1.onmessage=e=>{clearTimeout(timeout);channel.port1.close();resolve(e.data?.version);};
+        worker.postMessage({type:'QUIZ_VERSION'},[channel.port2]);
       });
-      await navigator.serviceWorker.ready;
-      document.documentElement.dataset.offlineReady = 'true';
-      // Registration checks for a new release on opening the page. Never reload
-      // or start competing update jobs while the user is answering a question.
-    } catch {
-      // Storage restrictions must never prevent answering or saving progress.
+      if(finished)return;
+      if(version&&(!expected||version===expected)) {
+        finished=true;cleanup();document.documentElement.dataset.offlineReady='true';
+        show('题库已存到本机，可离线刷题');return;
+      }
     }
-  })();
-}
+    timer=setTimeout(check,500);
+  }
+  navigator.serviceWorker.addEventListener('controllerchange',check);
+  deadline=setTimeout(()=>{finished=true;cleanup();show('可以继续刷题，离线保存尚未完成');},60000);
+  navigator.serviceWorker.register('./sw.js',{scope:'./',updateViaCache:'none'})
+    .then(()=>check())
+    .catch(()=>{finished=true;cleanup();show('可以继续刷题，离线保存暂未完成');});
+})();
 
 </script>
 </body>

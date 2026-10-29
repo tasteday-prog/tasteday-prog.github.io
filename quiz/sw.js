@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = 'ce004d53b9622d1bd38f94287ba01cabd9e7c2f183324fb61b535412f3ab3f1f';
+const VERSION = '34a26821301a88e32cecfad91bb3a39afc7e315fca59010488b6de772d452b1e';
 const PREFIX = 'adminlaw-offline-';
 // Share the activated snapshot: a navigation can briefly reach the prior worker
 // even after clients.claim(). Keep immutable copies for download verification.
@@ -63,13 +63,24 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
+  const latest = url.pathname === SCOPE.pathname + 'latest.html';
   if (event.request.mode !== 'navigate' || url.origin !== SCOPE.origin ||
-      ![SCOPE.pathname, SCOPE.pathname + 'index.html'].includes(url.pathname)) return;
+      ![SCOPE.pathname, SCOPE.pathname + 'index.html', SCOPE.pathname + 'latest.html'].includes(url.pathname)) return;
   // Open immediately from the complete local copy, even on a stalled network.
   // The registration checks for updates separately; an update never flips a question.
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
     const saved = await cache.match(SAVED) || await cache.match(APP);
+    // A newly shared release link must bypass an older worker once. Once its
+    // matching worker is installed, the same link opens directly from the phone.
+    if(latest && url.searchParams.has('release') && url.searchParams.get('release') !== VERSION) {
+      const controller=new AbortController();
+      const timeout=setTimeout(()=>controller.abort(),5000);
+      try {
+        const response=await fetch(event.request,{cache:'reload',signal:controller.signal});
+        if(response.ok)return response;
+      } catch {} finally {clearTimeout(timeout);}
+    }
     if (saved) {
       const headers = new Headers(saved.headers);
       headers.set('X-Quiz-Worker', VERSION);
