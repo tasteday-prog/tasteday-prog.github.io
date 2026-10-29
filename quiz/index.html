@@ -13,8 +13,10 @@
 
 /* Give the phone's first screen to the question, while keeping reading sizes. */
 /* Keep advancing within reach even when the answer explanation is long. */
-.actions.next-actions{position:fixed;left:50%;bottom:calc(var(--quiz-nav-height,0px) + env(safe-area-inset-bottom));transform:translateX(-50%);width:100%;max-width:760px;margin:0;padding:10px 18px;background:var(--paper);border-top:1px solid var(--line);z-index:11}
-.result{padding-bottom:88px}
+.question-nav{position:fixed;left:50%;bottom:calc(var(--quiz-nav-height,0px) + env(safe-area-inset-bottom));transform:translateX(-50%);width:100%;max-width:760px;margin:0;padding:10px 18px;background:var(--paper);border-top:1px solid var(--line);z-index:11}
+.question-nav .actions{margin:0;gap:12px}.question-nav .actions button{flex:1;min-width:0}.question-nav .secondary:disabled{color:#a0a59b;background:#eeefe7}.answer-feedback{min-height:24px;margin-bottom:6px;font-size:13px;line-height:1.5;color:var(--muted)}.answer-feedback.correct{color:var(--green)}.answer-feedback.wrong{color:var(--red)}.answer-feedback.neutral{color:#87612b}
+body:not([data-mode="stats"]) .shell{padding-bottom:calc(136px + var(--quiz-nav-height,0px) + env(safe-area-inset-bottom))}
+.result{padding-bottom:12px}
 .quiz-tools{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}.quiz-tools .progress-line{min-height:44px;display:flex;align-items:center;margin:0}.quiz-filters{margin-left:auto;max-width:100%}.quiz-filters[open]{width:100%}.filter-toggle{min-height:44px;display:flex;align-items:center;justify-content:flex-end;gap:6px;padding:0 3px;font-size:14px;list-style:none}.filter-toggle::-webkit-details-marker{display:none}.filter-toggle::after{content:'⌄';font-size:16px}.quiz-filters[open] .filter-toggle::after{content:'⌃'}.quiz-filters .controls{margin:4px 0 10px}
 @media(max-width:639px){
  body{--quiz-nav-height:56px}
@@ -179,6 +181,7 @@ const names = {single: '单选题', multiple: '多选题', judge: '判断题', c
 const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
 let state = freshState(), mode = 'new', filter = 'all', review = 'active', scope = 'all';
 let current = null, selected = [], result = null, roundDone = new Set(), storageBroken = false;
+let trail = [], trailIndex = -1;
 let rawBroken = '', resetOpen = false;
 function notice(text = '') {
   const el = document.querySelector('#notice');
@@ -219,12 +222,34 @@ function pool() {
 }
 function activeWrong(q) { return !isDisputed(q, reviews) && state.records[q.id]?.wrongCount && !state.records[q.id].mastered; }
 function doneCount(qs = bank) { return qs.filter(q=>wasDone(state,q.id)).length; }
-function pick(restore = false) {
+function snapshot() { return {id:current?.id || null, selected:[...selected], result}; }
+function remember() { if(trailIndex>=0)trail[trailIndex]=snapshot(); }
+function pick(restore = false, append = false) {
   const eligible = pool().filter(q => !roundDone.has(q.id));
   const draft = restore && mode === 'new' && state.draft && eligible.find(q => q.id === state.draft.id);
   current = draft || eligible[0] || null;
   selected = draft ? [...state.draft.selected] : [];
   result = null;
+  if(!append){trail=[];trailIndex=-1;}
+  trail.push(snapshot());trailIndex=trail.length-1;
+}
+function navigate(direction) {
+  remember();
+  if(direction<0 && trailIndex<=0 || direction>0 && !current)return;
+  if(direction<0 || trailIndex<trail.length-1){
+    const entry=trail[trailIndex+=direction];
+    current=byId.get(entry.id)||null;selected=[...entry.selected];result=entry.result;
+  }else{
+    roundDone.add(current.id);
+    if(state.draft?.id===current.id){state.draft=null;persist();}
+    pick(false,true);
+  }
+  render();top();
+}
+function navigationHtml() {
+  const disputed=current&&isDisputed(current,reviews);
+  const feedback=result?(disputed?'本题不判分 · 已记为做过':result.lastCorrect?'✓ 回答正确':'× 回答错误 · 正确答案 '+answerLabel(current,current.answer)):current?(current.type==='multiple'?'多选后提交；下一题可暂时跳过':'点选即判分；下一题可暂时跳过'):'本轮已结束，可回看上一题';
+  return `<nav class="question-nav" aria-label="题目导航"><div class="answer-feedback ${result?(disputed?'neutral':result.lastCorrect?'correct':'wrong'):''}" role="status" aria-live="polite">${escape(feedback)}</div><div class="actions"><button class="secondary" id="previous" ${trailIndex<=0?'disabled':''}>← 上一题</button><button class="primary" id="next" ${!current?'disabled':''}>下一题 →</button></div></nav>`;
 }
 function render() {
   document.body.dataset.mode = mode;
@@ -238,17 +263,18 @@ function render() {
   main.innerHTML = `<div class="quiz-tools"><div class="progress-line"><span>${mode==='new'?`${preferences.stage==='quality'?'优质题':preferences.stage==='ordinary'?'普通题':'全部'} · 已做 ${answered} / ${stageProgress.total}`:mode==='disputed'?'口径差异 · 本题不判分':`本轮已练 ${roundDone.size} 题`}</span></div><details class="quiz-filters"><summary class="filter-toggle">${scope!=='all'&&mode==='new'?'核查筛选':filter==='all'?'筛选':names[filter]}${mode==='wrong'?' · '+({active:'待巩固',mastered:'已掌握',all:'全部错题'}[review]):''}</summary>${controls}</details></div>`;
   if (!current) {
     const remaining = pool().length;
-    const title = mode === 'new' ? (preferences.stage==='quality'?'当前优质题已做完':preferences.stage==='ordinary'?'当前普通题已做完':filter==='all'&&scope==='all'&&preferences.domain==='all'&&preferences.topic==='all'?'新题全部刷完了':'当前筛选下的新题刷完了') : mode==='disputed' ? (remaining?'这一轮差异题看完了':'当前筛选下没有差异题') : remaining ? '这一轮练完了' : review === 'mastered' ? '这里会留下已掌握的错题' : '暂时没有待巩固的错题';
-    const message = mode === 'new' ? (preferences.stage==='quality'?'本阶段做完不等于全部题库已做完，也不代表全部掌握。可以巩固错题，或继续未做的普通题。':'已经提交过的题不会再混入新题。可以切换阶段、调整筛选，或去错题集巩固。') : remaining ? '本轮每题只出现一次，可以再练一轮。' : review === 'mastered' ? '错题重练答对后会移到这里，历史记录会保留。' : '答错的题会自动收进来；重练答对后标记为已掌握。';
+    const title = mode === 'new' && remaining ? '这一轮已看完，还有未答题' : mode === 'new' ? (preferences.stage==='quality'?'当前优质题已做完':preferences.stage==='ordinary'?'当前普通题已做完':filter==='all'&&scope==='all'&&preferences.domain==='all'&&preferences.topic==='all'?'新题全部刷完了':'当前筛选下的新题刷完了') : mode==='disputed' ? (remaining?'这一轮差异题看完了':'当前筛选下没有差异题') : remaining ? '这一轮练完了' : review === 'mastered' ? '这里会留下已掌握的错题' : '暂时没有待巩固的错题';
+    const message = mode === 'new' && remaining ? '暂时跳过的题没有记为已做。可以回看上一题，或再练一轮继续作答。' : mode === 'new' ? (preferences.stage==='quality'?'本阶段做完不等于全部题库已做完，也不代表全部掌握。可以巩固错题，或继续未做的普通题。':'已经提交过的题不会再混入新题。可以切换阶段、调整筛选，或去错题集巩固。') : remaining ? '本轮每题只出现一次，可以再练一轮。' : review === 'mastered' ? '错题重练答对后会移到这里，历史记录会保留。' : '答错的题会自动收进来；重练答对后标记为已掌握。';
     main.insertAdjacentHTML('beforeend', `<section class="empty"><div class="symbol" aria-hidden="true">✓</div><h2>${title}</h2><p>${message}</p>${mode==='new'&&preferences.stage!=='ordinary'?'<button class="primary" id="ordinary-next">继续普通题 →</button>':''}${remaining?'<button class="primary" id="restart">再练一轮</button>':'<button class="text-link" id="switch-mode">'+(mode==='new'?'去错题集':'继续做新题')+'</button>'}</section>`);
   } else {
     const q = current, record = state.records[q.id], audit = reviews[q.id], disputed = isDisputed(q, reviews), lesson=learning.questions[q.id], concept=topicById.get(lesson.topic);
     const typeLabel = q.category==='case' ? `案例 · ${names[q.type]}` : names[q.type];
-    main.insertAdjacentHTML('beforeend', `<article><div class="question-meta"><span class="tag">${lesson.stage==='quality'?'优质':'普通'} · ${typeLabel}</span><span>题库第 ${q.number} 题</span><span class="audit-tag ${disputed?'disputed':''}">${disputed?'口径差异／疑义':audit?'已核对':'待核验'}</span>${mode==='wrong'?`<span>累计答错 ${record.wrongCount} 次</span>`:''}</div>${q.material?`<details class="material" open><summary>案例材料 · 点击可收起</summary><p>${escape(q.material)}</p></details>`:''}<h2 class="question">${escape(q.stem)}</h2><div class="hint">${disputed?'可先选择，再看两种口径；本题不判分':escape(concept.title)+' · '+(q.type==='multiple'?'多选，选全':'先答题再看解析')}</div><div class="options ${q.type==='multiple'?'multiple':''}" role="group" aria-label="答案选项">${q.options.map(o => {
+    main.insertAdjacentHTML('beforeend', `<article><div class="question-meta"><span class="tag">${lesson.stage==='quality'?'优质':'普通'} · ${typeLabel}</span><span>题库第 ${q.number} 题</span><span class="audit-tag ${disputed?'disputed':''}">${disputed?'口径差异／疑义':audit?'已核对':'待核验'}</span>${mode==='wrong'?`<span>累计答错 ${record.wrongCount} 次</span>`:''}</div>${q.material?`<details class="material" open><summary>案例材料 · 点击可收起</summary><p>${escape(q.material)}</p></details>`:''}<h2 class="question">${escape(q.stem)}</h2><div class="hint">${disputed?'可先选择，再看两种口径；本题不判分':escape(concept.title)+' · '+(q.type==='multiple'?'多选，选全后提交':'点选即判分')}</div><div class="options ${q.type==='multiple'?'multiple':''}" role="group" aria-label="答案选项">${q.options.map(o => {
       const chosen = selected.includes(o.key), correct = result && !disputed && q.answer.includes(o.key), wrong = result && !disputed && chosen && !correct;
       return `<button class="option ${chosen?'selected':''} ${correct?'correct':''} ${wrong?'incorrect':''}" data-answer="${o.key}" aria-pressed="${chosen}" ${result?'disabled':''}><span class="letter" aria-hidden="true">${q.type==='judge'?(o.key==='T'?'✓':'×'):o.key}</span><span class="option-text">${escape(o.text)}</span>${result?`<span class="mark">${correct?'✓':wrong?'×':''}</span>`:''}</button>`;
-    }).join('')}</div>${result?resultHtml(q,result):''}<div class="actions${result?' next-actions':''}">${result?'<button class="primary" id="next">下一题 →</button>':`<button class="secondary" id="skip">稍后做</button><button class="primary" id="submit" ${selected.length?'':'disabled'}>${disputed?'查看两种口径':'提交答案'}</button>`}</div></article>`);
+    }).join('')}</div>${!result&&q.type==='multiple'?`<div class="actions"><button class="primary" id="submit" ${selected.length?'':'disabled'}>${disputed?'查看两种口径':'提交答案'}</button></div>`:''}${result?resultHtml(q,result):''}</article>`);
   }
+  main.insertAdjacentHTML('beforeend',navigationHtml());
   for(const [id,key] of [['stage-filter','stage'],['domain-filter','domain'],['topic-filter','topic']]) {
    const control=document.getElementById(id);
    if(control)control.onchange=e=>{
@@ -269,13 +295,14 @@ function render() {
     if (result) return;
     const key=button.dataset.answer;
     selected=current.type==='multiple'?(selected.includes(key)?selected.filter(k=>k!==key):[...selected,key]):[key];
+    if(current.type!=='multiple'){submit();return;}
     updateDraft();
     main.querySelectorAll('[data-answer]').forEach(b=>{const yes=selected.includes(b.dataset.answer);b.classList.toggle('selected',yes);b.setAttribute('aria-pressed',String(yes));});
     document.querySelector('#submit').disabled=!selected.length;
   });
   bind('#submit', submit);
-  bind('#next',()=>{if(current)roundDone.add(current.id);pick();render();top();});
-  bind('#skip',()=>{if(current)roundDone.add(current.id);state.draft=null;persist();pick();if(!current&&pool().length){roundDone.clear();pick();}render();top();});
+  bind('#previous',()=>navigate(-1));
+  bind('#next',()=>navigate(1));
   bind('#restart',()=>{roundDone.clear();pick();render();top();});
   bind('#switch-mode',()=>switchMode(mode==='new'?'wrong':'new'));
 }
@@ -309,9 +336,9 @@ function submit() {
     state.records[current.id]=result;
   }
   if(state.draft?.id===current.id)state.draft=null;
-  persist();render();
-  document.querySelector('#result').focus({preventScroll:true});
-  document.querySelector('#result').scrollIntoView({block:'nearest',behavior:'instant'});
+  const scrollY=window.scrollY;
+  persist();remember();render();
+  window.scrollTo({top:scrollY,behavior:'instant'});
 }
 function switchMode(nextMode) {
   mode=nextMode;roundDone.clear();result=null;resetOpen=false;
