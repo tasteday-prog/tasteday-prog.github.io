@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = '21ad021a1dd0755340529cd9cc16b5c7006309233be81d2bd4587de5ab59108e';
+const VERSION = '67be1157abc6e9008906a3b4e9300440147635ff2786f056700265ac2af4b62d';
 const PREFIX = 'adminlaw-judge-false-offline-';
 // Share the activated snapshot: a navigation can briefly reach the prior worker
 // even after clients.claim(). Keep immutable copies for download verification.
@@ -9,7 +9,7 @@ const SCOPE = new URL('./', self.location.href);
 const SAVED = new URL('./saved-quiz.html', self.location.href).href;
 
 self.addEventListener('message', event => {
-  if (event.data?.type === 'QUIZ_VERSION') event.ports[0]?.postMessage({version: VERSION});
+  if (event.data?.type === 'QUIZ_VERSION') event.ports[0]?.postMessage({version: VERSION, reader: true});
 });
 
 async function downloadSnapshot() {
@@ -63,9 +63,9 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
-  const latest = url.pathname === SCOPE.pathname + 'latest.html';
+  const latest = ['latest.html','read.html'].some(name=>url.pathname===SCOPE.pathname+name);
   if (event.request.mode !== 'navigate' || url.origin !== SCOPE.origin ||
-      ![SCOPE.pathname, SCOPE.pathname + 'index.html', SCOPE.pathname + 'latest.html'].includes(url.pathname)) return;
+      ![SCOPE.pathname, SCOPE.pathname + 'index.html', SCOPE.pathname + 'latest.html', SCOPE.pathname + 'read.html'].includes(url.pathname)) return;
   // Open immediately from the complete local copy, even on a stalled network.
   // The registration checks for updates separately; an update never flips a question.
   event.respondWith((async () => {
